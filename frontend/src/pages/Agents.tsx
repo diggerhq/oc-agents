@@ -66,7 +66,8 @@ const CLAUDE_CODE_MODELS: { id: string; name: string; description: string }[] = 
 ];
 
 // Only task agents for now — code and portal types commented out
-const AGENT_TYPES: { id: AgentType; name: string; description: string }[] = [
+// @ts-ignore — kept for future use
+const _AGENT_TYPES: { id: AgentType; name: string; description: string }[] = [
   // {
   //   id: 'code',
   //   name: 'Code Agent',

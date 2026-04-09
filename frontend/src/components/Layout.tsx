@@ -1,8 +1,7 @@
-import { useState, useEffect } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '@/stores/auth';
 import { useTheme } from '@/stores/theme';
-import { workflowOrchestration } from '@/lib/api';
+// import { workflowOrchestration } from '@/lib/api';
 import { OrgSwitcher } from './OrgSwitcher';
 
 // Navigation items with icons
@@ -109,26 +108,20 @@ export function Layout() {
   const { user, isAuthenticated, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
-  const [approvalCount, setApprovalCount] = useState(0);
-
-  // Poll for pending approvals count
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    
-    const fetchApprovals = async () => {
-      try {
-        const { count } = await workflowOrchestration.getPendingApprovals();
-        setApprovalCount(count);
-      } catch {
-        // Ignore errors
-      }
-    };
-    
-    fetchApprovals();
-    const interval = setInterval(fetchApprovals, 30000);
-    
-    return () => clearInterval(interval);
-  }, [isAuthenticated]);
+  // Approvals polling disabled — feature hidden
+  // const [approvalCount, setApprovalCount] = useState(0);
+  // useEffect(() => {
+  //   if (!isAuthenticated) return;
+  //   const fetchApprovals = async () => {
+  //     try {
+  //       const { count } = await workflowOrchestration.getPendingApprovals();
+  //       setApprovalCount(count);
+  //     } catch {}
+  //   };
+  //   fetchApprovals();
+  //   const interval = setInterval(fetchApprovals, 30000);
+  //   return () => clearInterval(interval);
+  // }, [isAuthenticated]);
 
   const handleLogout = async () => {
     await logout();
@@ -243,11 +236,7 @@ export function Layout() {
               >
                 {item.icon}
                 <span>{item.name}</span>
-                {item.showBadge && approvalCount > 0 && (
-                  <span className="absolute right-3 w-5 h-5 bg-yellow-500 text-black text-xs rounded-full flex items-center justify-center font-semibold">
-                    {approvalCount}
-                  </span>
-                )}
+                {/* Badge hidden — Approvals tab commented out */}
               </Link>
             );
           })}
