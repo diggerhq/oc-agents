@@ -1,0 +1,10 @@
+# https://e2b.dev/docs/sandbox-template
+
+# Dockerfile to use for the template
+dockerfile = "e2b.Dockerfile"
+
+# Name of the template (optional)
+name = "opencode-agent"
+
+# Start command (optional)
+start_cmd = "/bin/bash"

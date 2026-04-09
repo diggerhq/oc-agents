@@ -1,0 +1,57 @@
+{
+  "name": "@opencomputer/agents-sdk",
+  "version": "0.1.0",
+  "description": "Official TypeScript SDK for OpenComputer Agents - Run AI agents programmatically",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build",
+    "test": "npx tsx src/tests/sdk.test.ts",
+    "test:verbose": "OC_DEBUG=1 npx tsx src/tests/sdk.test.ts"
+  },
+  "keywords": [
+    "opencomputer",
+    "ai",
+    "agents",
+    "sdk",
+    "typescript",
+    "automation"
+  ],
+  "author": "OpenComputer",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/opencomputer/agents-sdk"
+  },
+  "homepage": "https://opencomputer.dev",
+  "bugs": {
+    "url": "https://github.com/opencomputer/agents-sdk/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}

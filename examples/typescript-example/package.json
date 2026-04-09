@@ -1,0 +1,11 @@
+{
+  "name": "oshu-typescript-example",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@opencomputer/agents-sdk": "file:../../packages/sdk-typescript"
+  }
+}

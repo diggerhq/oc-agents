@@ -1,0 +1,5 @@
+# Install the local Oshu SDK
+-e ../../packages/sdk-python/
+
+# Additional dependencies if needed
+asyncio-mqtt
