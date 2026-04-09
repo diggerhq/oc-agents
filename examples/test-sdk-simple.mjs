@@ -4,7 +4,7 @@
  * Simple SDK test - connect, list agents, run a prompt
  */
 
-import { OCAgents } from '../packages/sdk-typescript/dist/index.js';
+import { OCAgents } from '@opencomputer/agents-sdk';
 
 const API_KEY = process.env.API_KEY || 'flt_mTk8p8ov97g9xPYALhN82J2dq4G7X6g4';
 const BASE_URL = 'http://localhost:3000';

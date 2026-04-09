@@ -1,5 +1,5 @@
 """
-WebSocket client with auto-reconnect for Oshu SDK
+WebSocket client with auto-reconnect for OC Agents SDK
 """
 
 import json

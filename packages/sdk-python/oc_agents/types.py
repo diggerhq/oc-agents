@@ -1,5 +1,5 @@
 """
-Oshu SDK Types
+OC Agents SDK Types
 """
 
 from dataclasses import dataclass, field
@@ -72,10 +72,10 @@ class SdkSession:
 
 
 @dataclass
-class OshuConfig:
+class OCAgentsConfig:
     """Client configuration"""
     api_key: str
-    base_url: str = "https://api.oshu.dev"
+    base_url: str = "https://api.opencomputer.dev"
     timeout: float = 600.0  # 10 minutes default
 
 

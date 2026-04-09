@@ -1,5 +1,5 @@
 """
-Oshu SDK Test Suite (Python)
+OC Agents SDK Test Suite (Python)
 
 Run with: python -m pytest tests/test_sdk.py -v
 Or directly: python tests/test_sdk.py
@@ -18,8 +18,8 @@ from typing import Optional
 # Add parent directory to path for local development
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from oshu import Oshu
-from oshu.types import RunOptions, SubmitOptions, SdkSession
+from oc_agents import OCAgents
+from oc_agents.types import RunOptions, SubmitOptions, SdkSession
 
 API_KEY = os.environ.get('OSHU_API_KEY', 'flt_test_key')
 BASE_URL = os.environ.get('OSHU_BASE_URL', 'http://localhost:3000')
@@ -59,12 +59,12 @@ async def run_tests():
         print("❌ OSHU_AGENT_ID environment variable is required")
         sys.exit(1)
 
-    print("\n🧪 Oshu SDK Test Suite (Python)\n")
+    print("\n🧪 OC Agents SDK Test Suite (Python)\n")
     print(f"   API URL: {BASE_URL}")
     print(f"   Agent ID: {AGENT_ID}\n")
 
     runner = TestRunner()
-    client = Oshu(api_key=API_KEY, base_url=BASE_URL)
+    client = OCAgents(api_key=API_KEY, base_url=BASE_URL)
 
     test_session: Optional[SdkSession] = None
     session2: Optional[SdkSession] = None

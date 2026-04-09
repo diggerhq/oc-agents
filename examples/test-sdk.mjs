@@ -9,7 +9,7 @@
  * 3. Run: node test-sdk.mjs
  */
 
-import { Oshu } from '../packages/sdk-typescript/dist/index.js';
+import { Oshu } from '@opencomputer/agents-sdk';
 
 const API_KEY = process.env.API_KEY;
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';

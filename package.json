@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@diggerhq/anyware": "^0.7.31",
+    "@opencomputer/agents-sdk": "^0.1.0",
     "better-sqlite3": "^12.5.0"
   }
 }

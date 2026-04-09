@@ -1,32 +1,32 @@
-# oshu
+# OC Agents SDK
 
-Official Python SDK for [Oshu](https://oshu.dev) - Run AI agents programmatically.
+Official Python SDK for [OC Agents](https://opencomputer.dev) - Run AI agents programmatically.
 
 ## Installation
 
 ```bash
-pip install oshu
+pip install opencomputer-agents-sdk
 ```
 
 ## Quick Start
 
 ```python
 import asyncio
-from oshu import Oshu, RunOptions
+from oc_agents import OCAgents, RunOptions
 
 async def main():
-    oshu = Oshu(api_key='flt_xxx')
-    await oshu.connect()
+    client = OCAgents(api_key='flt_xxx')
+    await client.connect()
     
     # Run a task and wait for the result
-    result = await oshu.agents.run('agent-id', RunOptions(
+    result = await client.agents.run('agent-id', RunOptions(
         prompt='Analyze the sales data and provide a summary'
     ))
     
     print(result.output)  # Structured output (if agent has output_schema)
     print(result.result)  # Raw text output
     
-    await oshu.disconnect()
+    await client.disconnect()
 
 asyncio.run(main())
 ```
@@ -44,8 +44,8 @@ asyncio.run(main())
 ### Simple: Run and Wait
 
 ```python
-async with Oshu(api_key='oshu_xxx') as oshu:
-    result = await oshu.agents.run('agent-id', RunOptions(
+async with OCAgents(api_key='flt_xxx') as client:
+    result = await client.agents.run('agent-id', RunOptions(
         prompt='Analyze this data',
         timeout=300.0,  # 5 minutes max
     ))
@@ -59,13 +59,13 @@ async with Oshu(api_key='oshu_xxx') as oshu:
 ### Advanced: Stream Events
 
 ```python
-from oshu import Oshu, SubmitOptions
+from oc_agents import OCAgents, SubmitOptions
 
 async def main():
-    oshu = Oshu(api_key='flt_xxx')
-    await oshu.connect()
+    client = OCAgents(api_key='flt_xxx')
+    await client.connect()
     
-    task = await oshu.agents.submit('agent-id', SubmitOptions(
+    task = await client.agents.submit('agent-id', SubmitOptions(
         prompt='Long running analysis task'
     ))
     
@@ -86,7 +86,7 @@ async def main():
     except TaskCancelledError:
         print('Task was cancelled')
     
-    await oshu.disconnect()
+    await client.disconnect()
 
 asyncio.run(main())
 ```
@@ -94,7 +94,7 @@ asyncio.run(main())
 ### List Agents
 
 ```python
-agents = await oshu.agents.list()
+agents = await client.agents.list()
 for agent in agents:
     print(f"{agent.name} ({agent.id})")
     print(f"  Type: {agent.type}")
@@ -104,8 +104,8 @@ for agent in agents:
 ### Context Manager
 
 ```python
-async with Oshu(api_key='oshu_xxx') as oshu:
-    result = await oshu.agents.run('agent-id', RunOptions(prompt='Hello'))
+async with OCAgents(api_key='flt_xxx') as client:
+    result = await client.agents.run('agent-id', RunOptions(prompt='Hello'))
     print(result.output)
 # Automatically disconnects when done
 ```
@@ -113,9 +113,9 @@ async with Oshu(api_key='oshu_xxx') as oshu:
 ## Error Handling
 
 ```python
-from oshu import (
-    Oshu,
-    OshuError,
+from oc_agents import (
+    OCAgents,
+    OCError,
     TaskCancelledError,
     TaskFailedError,
     TaskTimeoutError,
@@ -123,7 +123,7 @@ from oshu import (
 )
 
 try:
-    result = await oshu.agents.run('agent-id', RunOptions(prompt='...'))
+    result = await client.agents.run('agent-id', RunOptions(prompt='...'))
 except TaskCancelledError:
     print('Task was cancelled')
 except TaskFailedError as e:
@@ -132,29 +132,29 @@ except TaskTimeoutError as e:
     print(f'Task timed out after {e.timeout}s')
 except AuthenticationError:
     print('Invalid API key')
-except OshuError as e:
-    print(f'Oshu error: {e} (code: {e.code})')
+except OCError as e:
+    print(f'OC Agents error: {e} (code: {e.code})')
 ```
 
 ## Configuration
 
 ```python
-oshu = Oshu(
-    api_key='oshu_xxx',           # Required: Your API key
-    base_url='https://api.oshu.dev',  # Optional: API base URL
+client = OCAgents(
+    api_key='flt_xxx',           # Required: Your API key
+    base_url='https://api.opencomputer.dev',  # Optional: API base URL
     timeout=600.0,                # Optional: Default timeout (10 min)
 )
 ```
 
 ## API Reference
 
-### `Oshu`
+### `OCAgents`
 
 Main client class.
 
 - `__init__(api_key, base_url, timeout)` - Create a new client
-- `connect()` - Connect to Oshu (required before using)
-- `disconnect()` - Disconnect from Oshu
+- `connect()` - Connect to OC Agents (required before using)
+- `disconnect()` - Disconnect from OC Agents
 - `is_connected()` - Check connection status
 - `agents` - Access agents resource
 

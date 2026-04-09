@@ -3,15 +3,15 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "oshu"
+name = "opencomputer-agents-sdk"
 version = "0.1.0"
-description = "Official Python SDK for Oshu - Run AI agents programmatically"
+description = "Official Python SDK for OC Agents - Run AI agents programmatically"
 readme = "README.md"
 license = "MIT"
 authors = [
-    { name = "Oshu", email = "hello@oshu.dev" }
+    { name = "OpenComputer", email = "hello@opencomputer.dev" }
 ]
-keywords = ["oshu", "ai", "agents", "sdk", "automation"]
+keywords = ["opencomputer", "ai", "agents", "sdk", "automation"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -40,13 +40,13 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://oshu.dev"
-Documentation = "https://oshu.dev/docs/sdk"
-Repository = "https://github.com/oshu-ai/oshu-sdk"
-Issues = "https://github.com/oshu-ai/oshu-sdk/issues"
+Homepage = "https://opencomputer.dev"
+Documentation = "https://opencomputer.dev/docs/sdk"
+Repository = "https://github.com/opencomputer/agents-sdk"
+Issues = "https://github.com/opencomputer/agents-sdk/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["oshu"]
+packages = ["oc_agents"]
 
 [tool.mypy]
 python_version = "3.9"

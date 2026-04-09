@@ -7,7 +7,7 @@
  * Warming up creates the sandbox and installs tools ahead of time.
  */
 
-import { Oshu } from '../packages/sdk-typescript/dist/index.js';
+import { Oshu } from '@opencomputer/agents-sdk';
 
 const oshu = new Oshu({
   apiKey: 'flt_GkBRHUPABVyy2bbkk-0KHxI73Z8cByN2',

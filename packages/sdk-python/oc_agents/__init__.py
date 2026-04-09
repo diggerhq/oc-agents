@@ -1,23 +1,23 @@
 """
-Oshu SDK for Python
+OC Agents SDK for Python
 
 Example:
     ```python
     import asyncio
-    from oshu import Oshu, RunOptions
+    from oc_agents import OCAgents, RunOptions
     
     async def main():
-        oshu = Oshu(api_key='flt_xxx')
-        await oshu.connect()
+        client = OCAgents(api_key='flt_xxx')
+        await client.connect()
         
         # Simple: run and wait for result
-        result = await oshu.agents.run('agent-id', RunOptions(
+        result = await client.agents.run('agent-id', RunOptions(
             prompt='Analyze this data'
         ))
         print(result.output)
         
         # Advanced: stream events and control task
-        task = await oshu.agents.submit('agent-id', SubmitOptions(
+        task = await client.agents.submit('agent-id', SubmitOptions(
             prompt='Long running task'
         ))
         task.on('stdout', print)
@@ -29,7 +29,7 @@ Example:
         # Wait for final result
         result = await task.result()
         
-        await oshu.disconnect()
+        await client.disconnect()
     
     asyncio.run(main())
     ```
@@ -38,14 +38,14 @@ Example:
 __version__ = '0.1.0'
 
 # Main client
-from .client import Oshu
+from .client import OCAgents
 
 # Task handle
 from .task import TaskHandle
 
 # Types
 from .types import (
-    OshuConfig,
+    OCAgentsConfig,
     Agent,
     AgentType,
     AgentProvider,
@@ -57,7 +57,7 @@ from .types import (
 
 # Errors
 from .errors import (
-    OshuError,
+    OCError,
     TaskCancelledError,
     TaskFailedError,
     TaskTimeoutError,
@@ -68,13 +68,13 @@ from .errors import (
 
 __all__ = [
     # Client
-    'Oshu',
+    'OCAgents',
     
     # Task
     'TaskHandle',
     
     # Types
-    'OshuConfig',
+    'OCAgentsConfig',
     'Agent',
     'AgentType',
     'AgentProvider',
@@ -84,7 +84,7 @@ __all__ = [
     'SubmitOptions',
     
     # Errors
-    'OshuError',
+    'OCError',
     'TaskCancelledError',
     'TaskFailedError',
     'TaskTimeoutError',

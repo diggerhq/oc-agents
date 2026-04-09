@@ -246,18 +246,24 @@ if (task.sessionId) {
 
 ### Installation
 
-#### TypeScript
+#### TypeScript / Node.js
 ```bash
-cd packages/sdk-typescript
-npm run build
-cd ../../your-project
-npm install file:../path/to/oc-agents/packages/sdk-typescript
+npm install @opencomputer/agents-sdk
 ```
 
 #### Python
 ```bash
-cd packages/sdk-python
-pip install -e .
+pip install opencomputer-agents-sdk
+```
+
+#### From source (development)
+```bash
+# TypeScript
+cd packages/sdk-typescript && npm run build
+npm install file:./packages/sdk-typescript
+
+# Python
+cd packages/sdk-python && pip install -e .
 ```
 
 ### Examples

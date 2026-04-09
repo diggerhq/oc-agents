@@ -4,7 +4,7 @@
  * Debug SDK test - just try to submit one task
  */
 
-import { Oshu } from '../packages/sdk-typescript/dist/index.js';
+import { Oshu } from '@opencomputer/agents-sdk';
 
 const API_KEY = process.env.API_KEY || 'flt_GkBRHUPABVyy2bbkk-0KHxI73Z8cByN2';
 const BASE_URL = 'http://localhost:3000';

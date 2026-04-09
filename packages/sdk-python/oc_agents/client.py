@@ -1,35 +1,35 @@
 """
-Oshu SDK Client
+OC Agents SDK Client
 """
 
 from typing import Optional
 
-from .types import OshuConfig
+from .types import OCAgentsConfig
 from .websocket import WebSocketClient
 from .agents import AgentsResource
-from .errors import OshuError
+from .errors import OCError
 
-DEFAULT_BASE_URL = 'https://api.oshu.dev'
+DEFAULT_BASE_URL = 'https://api.opencomputer.dev'
 DEFAULT_TIMEOUT = 600.0  # 10 minutes
 
 
-class Oshu:
+class OCAgents:
     """
-    Oshu SDK Client
+    OC Agents SDK Client
     
     Example:
         ```python
         import asyncio
-        from oshu import Oshu
+        from oc_agents import OCAgents
         
         async def main():
-            oshu = Oshu(api_key='flt_xxx')
-            await oshu.connect()
+            client = OCAgents(api_key='flt_xxx')
+            await client.connect()
             
-            result = await oshu.agents.run('agent-id', prompt='Hello')
+            result = await client.agents.run('agent-id', prompt='Hello')
             print(result.output)
             
-            await oshu.disconnect()
+            await client.disconnect()
         
         asyncio.run(main())
         ```
@@ -42,12 +42,12 @@ class Oshu:
         timeout: float = DEFAULT_TIMEOUT,
     ):
         if not api_key:
-            raise OshuError('API key is required', 'MISSING_API_KEY')
+            raise OCError('API key is required', 'MISSING_API_KEY')
         
         if not api_key.startswith('flt_'):
-            raise OshuError('Invalid API key format. API keys must start with "flt_"', 'INVALID_API_KEY')
+            raise OCError('Invalid API key format. API keys must start with "flt_"', 'INVALID_API_KEY')
         
-        self._config = OshuConfig(
+        self._config = OCAgentsConfig(
             api_key=api_key,
             base_url=base_url,
             timeout=timeout,
@@ -63,7 +63,7 @@ class Oshu:
     
     async def connect(self) -> None:
         """
-        Connect to the Oshu service.
+        Connect to the OC Agents service.
         Must be called before using the SDK.
         """
         if self._connected:
@@ -81,7 +81,7 @@ class Oshu:
         )
     
     async def disconnect(self) -> None:
-        """Disconnect from the Oshu service"""
+        """Disconnect from the OC Agents service"""
         if self._agents:
             await self._agents.close()
             self._agents = None
@@ -90,7 +90,7 @@ class Oshu:
         self._connected = False
     
     def is_connected(self) -> bool:
-        """Check if connected to Oshu"""
+        """Check if connected to OC Agents"""
         return self._connected and self._ws_client.is_connected()
     
     @property
@@ -101,22 +101,22 @@ class Oshu:
         Example:
             ```python
             # List all agents
-            agents = await oshu.agents.list()
+            agents = await client.agents.list()
             
             # Run a task (blocking)
-            result = await oshu.agents.run('agent-id', prompt='Hello')
+            result = await client.agents.run('agent-id', prompt='Hello')
             
             # Submit a task (non-blocking)
-            task = await oshu.agents.submit('agent-id', prompt='Hello')
+            task = await client.agents.submit('agent-id', prompt='Hello')
             task.on('stdout', print)
             result = await task.result()
             ```
         """
         if not self._agents:
-            raise OshuError('Not connected. Call connect() first.', 'NOT_CONNECTED')
+            raise OCError('Not connected. Call connect() first.', 'NOT_CONNECTED')
         return self._agents
     
-    async def __aenter__(self) -> 'Oshu':
+    async def __aenter__(self) -> 'OCAgents':
         """Async context manager entry"""
         await self.connect()
         return self

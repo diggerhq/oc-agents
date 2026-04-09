@@ -1,17 +1,17 @@
 """
-Oshu SDK Errors
+OC Agents SDK Errors
 """
 
 
-class OshuError(Exception):
-    """Base error class for Oshu SDK"""
+class OCError(Exception):
+    """Base error class for OC Agents SDK"""
     
     def __init__(self, message: str, code: str = 'OSHU_ERROR'):
         super().__init__(message)
         self.code = code
 
 
-class TaskCancelledError(OshuError):
+class TaskCancelledError(OCError):
     """Error raised when a task is cancelled"""
     
     def __init__(self, task_id: str):
@@ -19,7 +19,7 @@ class TaskCancelledError(OshuError):
         self.task_id = task_id
 
 
-class TaskFailedError(OshuError):
+class TaskFailedError(OCError):
     """Error raised when a task fails"""
     
     def __init__(self, task_id: str, error: str):
@@ -28,7 +28,7 @@ class TaskFailedError(OshuError):
         self.task_error = error
 
 
-class TaskTimeoutError(OshuError):
+class TaskTimeoutError(OCError):
     """Error raised when a task times out"""
     
     def __init__(self, task_id: str, timeout: float):
@@ -37,21 +37,21 @@ class TaskTimeoutError(OshuError):
         self.timeout = timeout
 
 
-class ConnectionError(OshuError):
+class ConnectionError(OCError):
     """Error raised when WebSocket connection fails"""
     
     def __init__(self, message: str):
         super().__init__(message, 'CONNECTION_ERROR')
 
 
-class AuthenticationError(OshuError):
+class AuthenticationError(OCError):
     """Error raised for authentication failures"""
     
     def __init__(self, message: str = 'Invalid API key'):
         super().__init__(message, 'AUTHENTICATION_ERROR')
 
 
-class AgentNotFoundError(OshuError):
+class AgentNotFoundError(OCError):
     """Error raised when an agent is not found"""
     
     def __init__(self, agent_id: str):

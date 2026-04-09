@@ -1,5 +1,5 @@
 """
-Agents resource for Oshu SDK
+Agents resource for OC Agents SDK
 """
 
 import json
@@ -13,7 +13,7 @@ except ImportError:
 
 from .types import Agent, TaskResult, RunOptions, SubmitOptions, SdkSession
 from .task import TaskHandle
-from .errors import OshuError
+from .errors import OCError
 
 T = TypeVar('T')
 
@@ -47,9 +47,9 @@ class AgentsResource:
         if response.status_code != 200:
             try:
                 error = response.json()
-                raise OshuError(error.get('error', 'Failed to list agents'), 'LIST_AGENTS_FAILED')
+                raise OCError(error.get('error', 'Failed to list agents'), 'LIST_AGENTS_FAILED')
             except json.JSONDecodeError:
-                raise OshuError(response.text, 'LIST_AGENTS_FAILED')
+                raise OCError(response.text, 'LIST_AGENTS_FAILED')
         
         data = response.json()
         return [
@@ -73,9 +73,9 @@ class AgentsResource:
         if response.status_code != 200:
             try:
                 error = response.json()
-                raise OshuError(error.get('error', 'Failed to get agent'), 'GET_AGENT_FAILED')
+                raise OCError(error.get('error', 'Failed to get agent'), 'GET_AGENT_FAILED')
             except json.JSONDecodeError:
-                raise OshuError(response.text, 'GET_AGENT_FAILED')
+                raise OCError(response.text, 'GET_AGENT_FAILED')
         
         agent = response.json()
         return Agent(
@@ -105,9 +105,9 @@ class AgentsResource:
         if response.status_code != 200:
             try:
                 error = response.json()
-                raise OshuError(error.get('error', 'Failed to create session'), 'CREATE_SESSION_FAILED')
+                raise OCError(error.get('error', 'Failed to create session'), 'CREATE_SESSION_FAILED')
             except json.JSONDecodeError:
-                raise OshuError(response.text, 'CREATE_SESSION_FAILED')
+                raise OCError(response.text, 'CREATE_SESSION_FAILED')
         
         data = response.json()
         return SdkSession(
@@ -170,7 +170,7 @@ class AgentsResource:
         
         def on_error(msg: Dict[str, Any]):
             if not task_created_future.done():
-                task_created_future.set_exception(OshuError(msg.get('message', 'Submit failed'), 'SUBMIT_FAILED'))
+                task_created_future.set_exception(OCError(msg.get('message', 'Submit failed'), 'SUBMIT_FAILED'))
         
         self._ws_client.on('message', on_message)
         self._ws_client.on('server_error', on_error)
@@ -263,9 +263,9 @@ class AgentsResource:
         if response.status_code != 200:
             try:
                 error = response.json()
-                raise OshuError(error.get('error', 'Failed to warm up agents'), 'WARMUP_FAILED')
+                raise OCError(error.get('error', 'Failed to warm up agents'), 'WARMUP_FAILED')
             except json.JSONDecodeError:
-                raise OshuError(f'HTTP {response.status_code}: {response.reason_phrase}', 'WARMUP_FAILED')
+                raise OCError(f'HTTP {response.status_code}: {response.reason_phrase}', 'WARMUP_FAILED')
         
         result = response.json()
         return {
