@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { runMigrations } from './migrations/runner.js';
+import { parsePgSslConfig } from '../utils/env.js';
 
 // PostgreSQL-only database layer
 console.log('[DB] Using PostgreSQL database');
@@ -9,9 +10,12 @@ let pgPool: pg.Pool | null = null;
 async function initPostgres() {
   const { Pool } = pg;
 
+  // SSL is decoupled from NODE_ENV so we can run "production-like" smoke tests
+  // against a non-SSL local Postgres, and so production can run against an
+  // RDS instance with strict verification when desired. See utils/env.ts.
   pgPool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    ssl: parsePgSslConfig(),
     max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 2000,

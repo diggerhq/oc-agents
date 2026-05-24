@@ -7,6 +7,7 @@ import type { User, Organization } from '../types/index.js';
 import { generateUniqueSlug } from '../middleware/orgAuth.js';
 import { withConstraintHandling } from '../utils/dbErrors.js';
 import { createDefaultBucket } from '../utils/defaultBucket.js';
+import { parseBoolEnv } from '../utils/env.js';
 
 /**
  * Create a personal organization for a user
@@ -66,9 +67,58 @@ async function getOrCreatePersonalOrg(userId: string, email: string): Promise<Or
 
 const router = Router();
 
-// Initialize WorkOS client
-const workos = new WorkOS(process.env.WORKOS_API_KEY);
-const clientId = process.env.WORKOS_CLIENT_ID!;
+// Lazy-initialize WorkOS client.
+// Importing this module previously crashed when WORKOS_API_KEY was unset because
+// the WorkOS SDK throws inside its constructor. We now defer construction until
+// a WorkOS-backed route is actually hit, and treat missing creds as "WorkOS disabled".
+//
+// Resolution rules:
+//   WORKOS_ENABLED=false              → disabled
+//   WORKOS_ENABLED=true + key present → enabled
+//   WORKOS_ENABLED=true + key missing → disabled, with a warning log
+//   WORKOS_ENABLED unset              → enabled iff WORKOS_API_KEY present
+const WORKOS_API_KEY_PRESENT = !!process.env.WORKOS_API_KEY;
+const WORKOS_ENABLED = parseBoolEnv('WORKOS_ENABLED', WORKOS_API_KEY_PRESENT) && WORKOS_API_KEY_PRESENT;
+if (parseBoolEnv('WORKOS_ENABLED', false) && !WORKOS_API_KEY_PRESENT) {
+  console.warn('[workos] WORKOS_ENABLED=true but WORKOS_API_KEY is unset — WorkOS routes will return 503.');
+}
+
+let _workos: WorkOS | null = null;
+function getWorkOS(): WorkOS {
+  if (!WORKOS_ENABLED) {
+    throw new Error(
+      'WorkOS is disabled (WORKOS_ENABLED=false or WORKOS_API_KEY unset). ' +
+      'Set WORKOS_ENABLED=true and provide WORKOS_API_KEY + WORKOS_CLIENT_ID to enable.'
+    );
+  }
+  if (!_workos) {
+    _workos = new WorkOS(process.env.WORKOS_API_KEY);
+  }
+  return _workos;
+}
+// Backwards-compat handle so any in-file references (`workos.xyz(...)`) still work
+// without rewriting every call site. They lazily resolve via the Proxy.
+const workos = new Proxy({} as WorkOS, {
+  get(_target, prop) {
+    const inst = getWorkOS();
+    // @ts-expect-error — dynamic forwarding
+    const value = inst[prop];
+    return typeof value === 'function' ? value.bind(inst) : value;
+  },
+});
+const clientId = process.env.WORKOS_CLIENT_ID || '';
+
+// Short-circuit all WorkOS routes with a clear error when disabled
+router.use((_req, res, next) => {
+  if (!WORKOS_ENABLED) {
+    return res.status(503).json({
+      error: 'workos_disabled',
+      message:
+        'WorkOS SSO is not configured on this server. Set WORKOS_API_KEY and WORKOS_CLIENT_ID to enable.',
+    });
+  }
+  next();
+});
 
 // Allowed domains for authentication (supports multiple domains pointing to same app)
 const ALLOWED_DOMAINS = ['oshu.dev', 'primeintuition.ai', 'localhost'];

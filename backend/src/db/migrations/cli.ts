@@ -2,6 +2,7 @@
 import 'dotenv/config';
 import { runMigrations, rollbackMigration, getMigrationStatus } from './runner.js';
 import { migrations } from './index.js';
+import { parsePgSslConfig } from '../../utils/env.js';
 import pg from 'pg';
 
 if (!process.env.DATABASE_URL) {
@@ -17,7 +18,7 @@ async function initPostgres() {
 
   pgPool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    ssl: parsePgSslConfig(),
   });
 
   console.log('[Migrations CLI] Connected to PostgreSQL');
