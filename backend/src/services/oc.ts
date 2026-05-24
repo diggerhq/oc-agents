@@ -64,9 +64,17 @@ const SNAPSHOTS: Record<ModelProvider, string | undefined> = {
 // OpenComputer API key
 const OC_API_KEY = process.env.OPENCOMPUTER_API_KEY || '';
 
-// Sandbox timeout in seconds - extended on each activity
-// 30 minutes base timeout, extended during active command execution
-const SANDBOX_TIMEOUT_S = 10; // 10 seconds - aggressive kill for dev
+// Sandbox lifetime in seconds, extended on each activity.
+// Default 1800s (30 min) leaves room for the initial installAgentTools
+// cold-boot path (apt + pipx + bun installs can take 2-3 minutes for the
+// heavier providers). Override via env, e.g. OC_SANDBOX_TIMEOUT_S=600
+// for short-lived sandboxes in dev or tests.
+const SANDBOX_TIMEOUT_S = (() => {
+  const raw = process.env.OC_SANDBOX_TIMEOUT_S;
+  if (!raw) return 1800;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1800;
+})();
 
 // How often to extend sandbox timeout during active execution (2 minutes)
 const KEEP_ALIVE_INTERVAL_MS = 2 * 60 * 1000; // still ms for setInterval
