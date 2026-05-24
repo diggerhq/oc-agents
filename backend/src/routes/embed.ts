@@ -13,6 +13,7 @@ import jwt from 'jsonwebtoken';
 import { query, queryOne, execute } from '../db/index.js';
 import { ocService, terminalEvents } from '../services/oc.js';
 import { getBuiltinSkills } from '../config/skills.js';
+import { assertModelProvider } from '../types/index.js';
 import { getS3MountConfig } from '../services/storage.js';
 import { logEvent } from '../services/analytics.js';
 import { syncAgentBucketsBackAndIndex } from '../services/attachedFilesSync.js';
@@ -372,14 +373,14 @@ router.post('/:agentId/users/:userId/warmup', async (req: Request, res: Response
     console.log(`[Embed] Creating sandbox for warmup: ${embedSandboxId}`);
     await ocService.createSandbox(
       embedSandboxId,
-      agentSession.agent_provider as 'claude-code' | 'aider' | 'opencode'
+      assertModelProvider(agentSession.agent_provider, 'embed.ts')
     );
     
     // Install tools
     console.log(`[Embed] Installing tools for warmup: ${embedSandboxId}`);
     await ocService.installAgentTools(
       embedSandboxId,
-      agentSession.agent_provider as 'claude-code' | 'aider' | 'opencode'
+      assertModelProvider(agentSession.agent_provider, 'embed.ts')
     );
     
     // Sync buckets attached to this agent
@@ -442,6 +443,29 @@ router.post('/:agentId/users/:userId/warmup', async (req: Request, res: Response
     
     // Parse custom secrets from agent config
     const customSecrets: Record<string, string> = config?.secrets ? JSON.parse(config.secrets) : {};
+
+    // Universal workspace setup — runs for ALL providers
+    await ocService.setupAgentWorkspace(embedSandboxId, {
+      systemPrompt: config?.system_prompt,
+      provider: agentSession.agent_provider as any,
+    });
+
+    // Phase 4: gbrain memory MCP — opt-in via secrets.GBRAIN_ENABLE='true'
+    if (customSecrets['GBRAIN_ENABLE'] === 'true') {
+      await ocService.setupGbrainMemory(embedSandboxId, {
+        provider: agentSession.agent_provider as any,
+        secrets: customSecrets,
+      });
+    }
+
+    // Phase 4: Telegram channel via native provider channels (openclaw/hermes)
+    if (customSecrets['TELEGRAM_BOT_TOKEN'] && customSecrets['TELEGRAM_USER_ID']) {
+      await ocService.configureTelegram(
+        embedSandboxId,
+        agentSession.agent_provider as any,
+        customSecrets
+      );
+    }
 
     // Configure Claude Code with system prompt, MCP servers, and knowledge bases
     if (agentSession.agent_provider === 'claude-code') {
@@ -736,10 +760,10 @@ router.post('/:agentId/users/:userId/threads/:threadId/stream', async (req: Requ
     if (!sandbox) {
       res.write(`data: ${JSON.stringify({ type: 'status', content: 'Starting agent environment...' })}\n\n`);
       
-      await ocService.createSandbox(embedSandboxId, agentSession.agent_provider as 'claude-code' | 'aider' | 'opencode');
+      await ocService.createSandbox(embedSandboxId, assertModelProvider(agentSession.agent_provider, 'embed.ts'));
       
       res.write(`data: ${JSON.stringify({ type: 'status', content: 'Installing tools...' })}\n\n`);
-      await ocService.installAgentTools(embedSandboxId, agentSession.agent_provider as 'claude-code' | 'aider' | 'opencode');
+      await ocService.installAgentTools(embedSandboxId, assertModelProvider(agentSession.agent_provider, 'embed.ts'));
       
       // Sync buckets attached to this agent
       const agentBuckets = await query<{ bucket_id: string; bucket_name: string; mount_path: string }>(
@@ -803,6 +827,31 @@ router.post('/:agentId/users/:userId/threads/:threadId/stream', async (req: Requ
           agentSession.repo_url,
           agentSession.branch || 'main',
           ownerUser.github_access_token
+        );
+      }
+
+      // Universal workspace setup — runs for ALL providers
+      res.write(`data: ${JSON.stringify({ type: 'status', content: 'Preparing workspace...' })}\n\n`);
+      await ocService.setupAgentWorkspace(embedSandboxId, {
+        systemPrompt: config?.system_prompt,
+        provider: agentSession.agent_provider as any,
+      });
+
+      // Phase 4: gbrain memory MCP — opt-in via secrets.GBRAIN_ENABLE='true'
+      if (customSecrets['GBRAIN_ENABLE'] === 'true') {
+        res.write(`data: ${JSON.stringify({ type: 'status', content: 'Setting up memory...' })}\n\n`);
+        await ocService.setupGbrainMemory(embedSandboxId, {
+          provider: agentSession.agent_provider as any,
+          secrets: customSecrets,
+        });
+      }
+
+      // Phase 4: Telegram channel via native provider channels (openclaw/hermes)
+      if (customSecrets['TELEGRAM_BOT_TOKEN'] && customSecrets['TELEGRAM_USER_ID']) {
+        await ocService.configureTelegram(
+          embedSandboxId,
+          agentSession.agent_provider as any,
+          customSecrets
         );
       }
 
@@ -1023,7 +1072,7 @@ router.post('/:agentId/users/:userId/threads/:threadId/stream', async (req: Requ
       // Run agent with enhanced system prompt (includes KB, MCP, secrets, skill files)
       result = await ocService.runAgentCommand(
         embedSandboxId,
-        agentSession.agent_provider as 'claude-code' | 'aider' | 'opencode',
+        assertModelProvider(agentSession.agent_provider, 'embed.ts'),
         fullPrompt,
         apiKey,
         agentSession.agent_model || undefined,

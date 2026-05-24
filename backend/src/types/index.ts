@@ -32,7 +32,50 @@ export interface Session {
   updated_at: string;
 }
 
-export type ModelProvider = 'claude-code' | 'aider' | 'opencode';
+/**
+ * Canonical list of all agent providers we support. New providers must be
+ * added here AND (a) given a CLI install/run branch in services/oc.ts and
+ * (b) included in the latest CHECK constraint migration on tasks.model_provider.
+ *
+ * Update both `MODEL_PROVIDERS` and any DB constraint together — if they
+ * drift, callers will silently see "agent_provider not allowed" 500s on
+ * INSERT instead of a typed compile error.
+ */
+export const MODEL_PROVIDERS = [
+  'claude-code',
+  'aider',
+  'opencode',
+  'openhands',
+  'hermes',
+  'goose',
+  'openclaw',
+] as const;
+
+export type ModelProvider = (typeof MODEL_PROVIDERS)[number];
+
+/**
+ * Type guard for ModelProvider. Use this at the DB-string → typed-value
+ * boundary instead of unchecked `as ModelProvider` casts, so we can fail
+ * loudly when the DB hands back an unknown value (e.g. after a deploy
+ * skew where the DB has a newer provider name than the running code).
+ */
+export function isModelProvider(value: unknown): value is ModelProvider {
+  return typeof value === 'string' && (MODEL_PROVIDERS as readonly string[]).includes(value);
+}
+
+/**
+ * Like `isModelProvider`, but throws if the value isn't valid. Use when
+ * an unknown provider is a programmer error you want to surface
+ * immediately rather than silently fall through provider branches.
+ */
+export function assertModelProvider(value: unknown, context: string): ModelProvider {
+  if (!isModelProvider(value)) {
+    throw new Error(
+      `unknown agent_provider "${String(value)}" (context: ${context}); expected one of ${MODEL_PROVIDERS.join(', ')}`
+    );
+  }
+  return value;
+}
 
 export interface Task {
   id: string;

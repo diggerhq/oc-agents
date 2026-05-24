@@ -2906,6 +2906,68 @@ const legacyMigrations: LegacyMigration[] = [
       `,
     },
   },
+  {
+    id: 74,
+    name: 'add_new_provider_types',
+    sqlite: {
+      up: `SELECT 1; -- SQLite no longer supported`,
+      down: `SELECT 1;`,
+    },
+    postgres: {
+      up: `
+        -- Extend sessions.agent_provider CHECK constraint to allow openhands, hermes, goose
+        ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_agent_provider_check;
+        ALTER TABLE sessions ADD CONSTRAINT sessions_agent_provider_check
+          CHECK (agent_provider IN ('claude-code', 'aider', 'opencode', 'openhands', 'hermes', 'goose'));
+      `,
+      down: `
+        ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_agent_provider_check;
+        ALTER TABLE sessions ADD CONSTRAINT sessions_agent_provider_check
+          CHECK (agent_provider IN ('claude-code', 'aider', 'opencode'));
+      `,
+    },
+  },
+  {
+    id: 75,
+    name: 'add_openclaw_provider',
+    sqlite: {
+      up: `SELECT 1; -- SQLite no longer supported`,
+      down: `SELECT 1;`,
+    },
+    postgres: {
+      up: `
+        ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_agent_provider_check;
+        ALTER TABLE sessions ADD CONSTRAINT sessions_agent_provider_check
+          CHECK (agent_provider IN ('claude-code', 'aider', 'opencode', 'openhands', 'hermes', 'goose', 'openclaw'));
+        ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_agent_provider_check;
+      `,
+      down: `
+        ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_agent_provider_check;
+        ALTER TABLE sessions ADD CONSTRAINT sessions_agent_provider_check
+          CHECK (agent_provider IN ('claude-code', 'aider', 'opencode', 'openhands', 'hermes', 'goose'));
+        ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_agent_provider_check;
+      `,
+    },
+  },
+  {
+    id: 76,
+    name: 'readd_tasks_model_provider_check',
+    sqlite: {
+      up: `SELECT 1; -- SQLite no longer supported`,
+      down: `SELECT 1;`,
+    },
+    postgres: {
+      up: `
+        ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_agent_provider_check;
+        ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_model_provider_check;
+        ALTER TABLE tasks ADD CONSTRAINT tasks_model_provider_check
+          CHECK (model_provider IN ('claude-code', 'aider', 'opencode', 'openhands', 'hermes', 'goose', 'openclaw'));
+      `,
+      down: `
+        ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_model_provider_check;
+      `,
+    },
+  },
 ];
 
 export const migrations: Migration[] = legacyMigrations.map((m) => ({

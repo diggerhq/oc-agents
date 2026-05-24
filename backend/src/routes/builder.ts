@@ -216,8 +216,8 @@ const builderTools: Anthropic.Tool[] = [
         },
         agent_provider: {
           type: 'string',
-          enum: ['claude-code', 'aider', 'opencode'],
-          description: 'Which AI provider to use: claude-code (Anthropic), aider (OpenAI), or opencode (multiple providers)',
+          enum: ['claude-code', 'aider', 'opencode', 'openhands', 'hermes', 'goose', 'openclaw'],
+          description: 'Which AI provider to use: claude-code (Anthropic), aider (OpenAI), opencode (multi-provider), openhands (All-Hands), hermes (NousResearch), goose (Block), or openclaw (OpenClaw personal-AI gateway)',
         },
         system_prompt: {
           type: 'string',

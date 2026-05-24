@@ -6,7 +6,7 @@ import { ModelSelector } from '@/components/ModelSelector';
 import { Modal } from '@/components/Modal';
 import { ShareResourceModal } from '@/components/ShareResourceModal';
 
-type AgentProvider = 'claude-code' | 'aider' | 'opencode';
+type AgentProvider = 'claude-code' | 'aider' | 'opencode' | 'openhands' | 'hermes' | 'goose' | 'openclaw';
 type AgentType = 'code' | 'task' | 'portal' | 'portal-sandbox';
 type RepoSource = 'existing' | 'create-new' | 'local';
 type GitProvider = 'github' | 'gitlab';
@@ -26,6 +26,26 @@ const PROVIDERS: { id: AgentProvider; name: string; description: string }[] = [
     id: 'opencode',
     name: 'OpenCode',
     description: '75 providers, 100k+ models',
+  },
+  {
+    id: 'openhands',
+    name: 'OpenHands',
+    description: 'All-Hands agentic dev (Python 3.12)',
+  },
+  {
+    id: 'hermes',
+    name: 'Hermes',
+    description: 'NousResearch agent CLI',
+  },
+  {
+    id: 'goose',
+    name: 'Goose',
+    description: "Block's Rust coding agent",
+  },
+  {
+    id: 'openclaw',
+    name: 'OpenClaw',
+    description: 'Personal-AI gateway (one-shot agent mode)',
   },
 ];
 
