@@ -19,7 +19,7 @@ const createSessionSchema = z.object({
   repo_url: z.string().url().optional(),  // Required for code agents
   repo_name: z.string().optional(),  // Required for code agents
   branch: z.string().default('main'),
-  agent_provider: z.enum(['claude-code', 'aider', 'opencode']).default('claude-code'),
+  agent_provider: z.enum(['claude-code', 'aider', 'opencode', 'openhands', 'hermes', 'goose', 'openclaw']).default('claude-code'),
   agent_model: z.string().optional(),  // e.g., "anthropic/claude-sonnet-4-20250514"
   system_prompt: z.string().optional(),
 }).refine(

@@ -13,6 +13,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { query, queryOne, execute } from '../db/index.js';
 import { ocService, terminalEvents, verifyGatewaySignature } from '../services/oc.js';
+import { assertModelProvider } from '../types/index.js';
 import { getBuiltinSkills } from '../config/skills.js';
 import { getS3MountConfig } from '../services/storage.js';
 import { logEvent } from '../services/analytics.js';
@@ -567,14 +568,14 @@ router.post('/:agentId/sessions/:sessionId/warmup', async (req: Request, res: Re
     console.log(`[Portal] Creating sandbox for warmup: ${portalSandboxId}`);
     await ocService.createSandbox(
       portalSandboxId,
-      agentSession.agent_provider as 'claude-code' | 'aider' | 'opencode'
+      assertModelProvider(agentSession.agent_provider, 'portal.ts')
     );
     
     // Install tools
     console.log(`[Portal] Installing tools for warmup: ${portalSandboxId}`);
     await ocService.installAgentTools(
       portalSandboxId,
-      agentSession.agent_provider as 'claude-code' | 'aider' | 'opencode'
+      assertModelProvider(agentSession.agent_provider, 'portal.ts')
     );
     
     // Sync buckets attached to this agent
@@ -643,6 +644,42 @@ router.post('/:agentId/sessions/:sessionId/warmup', async (req: Request, res: Re
     
     // Parse custom secrets from agent config
     const customSecrets: Record<string, string> = config?.secrets ? JSON.parse(config.secrets) : {};
+
+    // Universal workspace setup — runs for ALL providers (claude-code, aider, opencode,
+    // openhands, hermes, goose, openclaw). Creates ~/workspace/{skills,input,output,files}
+    // and writes AGENTS.md + CLAUDE.md so every CLI has a single source of instructions.
+    await ocService.setupAgentWorkspace(portalSandboxId, {
+      systemPrompt: config?.system_prompt,
+      provider: agentSession.agent_provider as any,
+    });
+
+    // Phase 4: gbrain memory MCP — opt-in via secrets.GBRAIN_ENABLE='true'
+    if (customSecrets['GBRAIN_ENABLE'] === 'true') {
+      console.log(`[Portal] Setting up gbrain memory for ${portalSandboxId}`);
+      const gbrainResult = await ocService.setupGbrainMemory(portalSandboxId, {
+        provider: agentSession.agent_provider as any,
+        secrets: customSecrets,
+      });
+      if (!gbrainResult.success) {
+        console.warn(`[Portal] gbrain setup failed: ${gbrainResult.error}`);
+      }
+    }
+
+    // Phase 4: Telegram channel — runs only if both TELEGRAM_BOT_TOKEN and
+    // TELEGRAM_USER_ID are in secrets, and provider supports native channels.
+    if (customSecrets['TELEGRAM_BOT_TOKEN'] && customSecrets['TELEGRAM_USER_ID']) {
+      console.log(`[Portal] Configuring Telegram channel for ${portalSandboxId}`);
+      const tgResult = await ocService.configureTelegram(
+        portalSandboxId,
+        agentSession.agent_provider as any,
+        customSecrets
+      );
+      if (!tgResult.success) {
+        console.warn(`[Portal] Telegram setup failed: ${tgResult.error}`);
+      } else if (tgResult.skipped) {
+        console.log(`[Portal] Telegram skipped: ${tgResult.reason}`);
+      }
+    }
 
     // Configure Claude Code with system prompt, MCP servers, and knowledge bases
     if (agentSession.agent_provider === 'claude-code') {
@@ -1265,11 +1302,11 @@ router.post('/:agentId/sessions/:sessionId/threads/:threadId/stream', async (req
       // Create new sandbox
       res.write(`data: ${JSON.stringify({ type: 'status', content: 'Starting agent environment...' })}\n\n`);
       
-      await ocService.createSandbox(portalSandboxId, agentSession.agent_provider as 'claude-code' | 'aider' | 'opencode');
+      await ocService.createSandbox(portalSandboxId, assertModelProvider(agentSession.agent_provider, 'portal.ts'));
       
       // Install agent tools
       res.write(`data: ${JSON.stringify({ type: 'status', content: 'Installing tools...' })}\n\n`);
-      await ocService.installAgentTools(portalSandboxId, agentSession.agent_provider as 'claude-code' | 'aider' | 'opencode');
+      await ocService.installAgentTools(portalSandboxId, assertModelProvider(agentSession.agent_provider, 'portal.ts'));
       
       // Sync buckets attached to this agent
       const agentBuckets = await query<{ bucket_id: string; bucket_name: string; mount_path: string }>(
@@ -1339,6 +1376,33 @@ router.post('/:agentId/sessions/:sessionId/threads/:threadId/stream', async (req
           agentSession.repo_url,
           agentSession.branch || 'main',
           user.github_access_token
+        );
+      }
+
+      // Universal workspace setup — runs for ALL providers, sets up
+      // ~/workspace/{skills,input,output,files} + AGENTS.md + CLAUDE.md + Python doc libs.
+      res.write(`data: ${JSON.stringify({ type: 'status', content: 'Preparing workspace...' })}\n\n`);
+      await ocService.setupAgentWorkspace(portalSandboxId, {
+        systemPrompt: config?.system_prompt,
+        provider: agentSession.agent_provider as any,
+      });
+
+      // Phase 4: gbrain memory MCP — opt-in via secrets.GBRAIN_ENABLE='true'.
+      // Idempotent — short-circuits if already installed.
+      if (customSecrets['GBRAIN_ENABLE'] === 'true') {
+        res.write(`data: ${JSON.stringify({ type: 'status', content: 'Setting up memory...' })}\n\n`);
+        await ocService.setupGbrainMemory(portalSandboxId, {
+          provider: agentSession.agent_provider as any,
+          secrets: customSecrets,
+        });
+      }
+
+      // Phase 4: Telegram channel via native provider channels (openclaw/hermes)
+      if (customSecrets['TELEGRAM_BOT_TOKEN'] && customSecrets['TELEGRAM_USER_ID']) {
+        await ocService.configureTelegram(
+          portalSandboxId,
+          agentSession.agent_provider as any,
+          customSecrets
         );
       }
 
@@ -1645,7 +1709,7 @@ router.post('/:agentId/sessions/:sessionId/threads/:threadId/stream', async (req
       // Run the agent command - use configuredSystemPrompt which includes KB, MCP, secrets, and skill file instructions
       result = await ocService.runAgentCommand(
         portalSandboxId,
-        agentSession.agent_provider as 'claude-code' | 'aider' | 'opencode',
+        assertModelProvider(agentSession.agent_provider, 'portal.ts'),
         fullPrompt,
         apiKey,
         agentSession.agent_model || undefined,
@@ -1665,8 +1729,8 @@ router.post('/:agentId/sessions/:sessionId/threads/:threadId/stream', async (req
         res.write(`data: ${JSON.stringify({ type: 'status', content: 'Session expired, restarting agent...' })}\n\n`);
         
         // Recreate sandbox
-        await ocService.createSandbox(portalSandboxId, agentSession.agent_provider as 'claude-code' | 'aider' | 'opencode');
-        await ocService.installAgentTools(portalSandboxId, agentSession.agent_provider as 'claude-code' | 'aider' | 'opencode');
+        await ocService.createSandbox(portalSandboxId, assertModelProvider(agentSession.agent_provider, 'portal.ts'));
+        await ocService.installAgentTools(portalSandboxId, assertModelProvider(agentSession.agent_provider, 'portal.ts'));
         
         // Re-sync buckets after sandbox recreation
         const agentBucketsRetry = await query<{ bucket_id: string; bucket_name: string; mount_path: string }>(
@@ -1741,7 +1805,7 @@ router.post('/:agentId/sessions/:sessionId/threads/:threadId/stream', async (req
         // Retry the command (reuse the extendedThinking config from above)
         result = await ocService.runAgentCommand(
           portalSandboxId,
-          agentSession.agent_provider as 'claude-code' | 'aider' | 'opencode',
+          assertModelProvider(agentSession.agent_provider, 'portal.ts'),
           fullPrompt,
           apiKey,
           agentSession.agent_model || undefined,

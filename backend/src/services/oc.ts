@@ -59,6 +59,10 @@ const SNAPSHOTS: Record<ModelProvider, string | undefined> = {
   'claude-code': process.env.OPENCOMPUTER_SNAPSHOT_CLAUDE_CODE || 'claude-code-agent',
   'aider': process.env.OPENCOMPUTER_SNAPSHOT_AIDER || 'aider-agent',
   'opencode': process.env.OPENCOMPUTER_SNAPSHOT_OPENCODE || 'opencode-agent',
+  'openhands': process.env.OPENCOMPUTER_SNAPSHOT_OPENHANDS || 'openhands-agent',
+  'hermes': process.env.OPENCOMPUTER_SNAPSHOT_HERMES || 'hermes-agent',
+  'goose': process.env.OPENCOMPUTER_SNAPSHOT_GOOSE || 'goose-agent',
+'openclaw': process.env.OPENCOMPUTER_SNAPSHOT_OPENCLAW || 'openclaw-agent',
 };
 
 // OpenComputer API key
@@ -136,10 +140,20 @@ export class OCService {
   private ptysessions: Map<string, any> = new Map(); // Store PTY sessions by sessionId
 
   async createSandbox(sessionId: string, provider?: ModelProvider): Promise<SandboxInfo> {
-    // Use pre-built snapshot if available, otherwise use default
-    const snapshotName = provider ? SNAPSHOTS[provider] : undefined;
+    // Use pre-built snapshot if available, otherwise use default.
+    //
+    // OPENCOMPUTER_DISABLE_SNAPSHOTS=1 forces cold-boot only. We added this
+    // because the upstream `ForkFromCheckpoint` path on self-hosted OC has
+    // a virtio-serial issue: every fork uses the global "golden memory"
+    // snapshot but the checkpoint's rootfs, causing the in-memory agent
+    // state to mismatch the disk. Cold-boot via templateID="default"
+    // works fine and `installAgentTools` apt-installs the provider tooling
+    // at runtime (~30s-5min one-off cost per cold sandbox). Remove this
+    // flag once the upstream golden-mem-per-template bug is fixed.
+    const snapshotsDisabled = process.env.OPENCOMPUTER_DISABLE_SNAPSHOTS === '1';
+    const snapshotName = (!snapshotsDisabled && provider) ? SNAPSHOTS[provider] : undefined;
 
-    console.log(`[Sandbox] Creating sandbox${snapshotName ? ` with snapshot ${snapshotName}` : ' (default)'} with ${SANDBOX_TIMEOUT_S / 60}min timeout`);
+    console.log(`[Sandbox] Creating sandbox${snapshotName ? ` with snapshot ${snapshotName}` : ' (default cold-boot)'} with ${SANDBOX_TIMEOUT_S / 60}min timeout`);
 
     // OpenComputer API: Sandbox.create({ snapshot, timeout, apiKey })
     const sandbox = await Sandbox.create({
@@ -298,7 +312,12 @@ export class OCService {
     const pathSetup = 'export PATH="$HOME/go/bin:$HOME/.local/bin:/usr/local/bin:$PATH"';
     const checkCmd = provider === 'claude-code' ? `${pathSetup} && claude --version`
       : provider === 'aider' ? `${pathSetup} && aider --version`
-      : `${pathSetup} && opencode -v`;
+      : provider === 'opencode' ? `${pathSetup} && opencode -v`
+      : provider === 'openhands' ? `${pathSetup} && openhands --version`
+      : provider === 'hermes' ? `${pathSetup} && (hermes --version 2>&1 || hermes -h 2>&1 | head -1)`
+      : provider === 'goose' ? `${pathSetup} && goose --version`
+      : provider === 'openclaw' ? `export PATH="$HOME/.openclaw/bin:$PATH" && openclaw --version`
+      : `${pathSetup} && echo unknown-provider && false`;
     
     const checkResult = await sandbox.exec.run(checkCmd, { timeout: 10 });
     if (checkResult.exitCode === 0) {
@@ -358,11 +377,531 @@ export class OCService {
             return { success: false, error: `Failed to install OpenCode: ${binaryResult.stderr?.slice(0, 500)}` };
           }
         }
+      } else if (provider === 'openhands') {
+        // OpenHands - Python 3.12 + uv (pins Python ==3.12)
+        const installResult = await sandbox.exec.run(
+          'sudo apt-get update && sudo apt-get install -y python3.12 python3.12-venv python3-pip git curl && curl -fsSL https://astral.sh/uv/install.sh | sudo env UV_INSTALL_DIR=/usr/local/bin sh && sudo /usr/local/bin/uv tool install --python 3.12 openhands-ai',
+          { timeout: 600 }
+        );
+        console.log(`[Sandbox] OpenHands install: exit=${installResult.exitCode}`);
+        if (installResult.exitCode !== 0) {
+          return { success: false, error: `Failed to install OpenHands: ${installResult.stderr?.slice(0, 500)}` };
+        }
+      } else if (provider === 'hermes') {
+        // Hermes agent (from NousResearch) - Python; needs HERMES_NON_INTERACTIVE to skip wizard
+        const installResult = await sandbox.exec.run(
+          'sudo apt-get update && sudo apt-get install -y python3 python3-pip python3-venv pipx git curl && sudo PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install hermes-agent && mkdir -p $HOME/.hermes && echo "non_interactive: true" > $HOME/.hermes/config.yaml',
+          { timeout: 600 }
+        );
+        console.log(`[Sandbox] Hermes install: exit=${installResult.exitCode}`);
+        if (installResult.exitCode !== 0) {
+          // Fallback: pip with --break-system-packages
+          const fallbackResult = await sandbox.exec.run(
+            'sudo pip3 install --break-system-packages hermes-agent && mkdir -p $HOME/.hermes && echo "non_interactive: true" > $HOME/.hermes/config.yaml',
+            { timeout: 300 }
+          );
+          if (fallbackResult.exitCode !== 0) {
+            return { success: false, error: `Failed to install Hermes: ${fallbackResult.stderr?.slice(0, 500)}` };
+          }
+        }
+      } else if (provider === 'goose') {
+        // Goose (Block) - Rust binary via official installer, headless mode
+        const installResult = await sandbox.exec.run(
+          'sudo apt-get update && sudo apt-get install -y curl ca-certificates bzip2 libxcb1 libdbus-1-3 && curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | sudo CONFIGURE=false GOOSE_BIN_DIR=/usr/local/bin bash',
+          { timeout: 300 }
+        );
+        console.log(`[Sandbox] Goose install: exit=${installResult.exitCode}`);
+        if (installResult.exitCode !== 0) {
+          return { success: false, error: `Failed to install Goose: ${installResult.stderr?.slice(0, 500)}` };
+        }
+      } else if (provider === 'openclaw') {
+        // OpenClaw — Node-based personal-AI gateway with a one-shot agent CLI mode.
+        // Install script is non-interactive; pulls a vendored Node + bootstraps ~/.openclaw.
+        const installResult = await sandbox.exec.run(
+          'export CI=1 NPM_CONFIG_YES=true && curl -fsSL https://openclaw.ai/install-cli.sh | bash && export PATH="$HOME/.openclaw/bin:$PATH" && openclaw --version',
+          { timeout: 600 }
+        );
+        console.log(`[Sandbox] OpenClaw install: exit=${installResult.exitCode}`);
+        if (installResult.exitCode !== 0) {
+          return { success: false, error: `Failed to install OpenClaw: ${installResult.stderr?.slice(0, 500)}` };
+        }
       }
 
       return { success: true };
     } catch (error) {
       console.error(`[Sandbox] Install ${provider} error:`, error);
+      return { success: false, error: String(error) };
+    }
+  }
+
+  /**
+   * Universal sandbox workspace setup that applies to ALL agent providers.
+   * Mirrors the provider-agnostic parts of configureClaudeSettings:
+   *   - Creates ~/workspace/{skills,input,output,files} directories
+   *   - Writes skill files into ~/workspace/skills/
+   *   - Writes a universal AGENTS.md at the workspace root
+   *   - Installs common Python doc libraries (pptx, openpyxl, docx)
+   *
+   * Provider-specific setup (Claude's .mcp.json, OpenHands settings.json, etc.)
+   * happens in separate configureXSettings methods called AFTER this.
+   *
+   * This is idempotent and safe to call multiple times — most steps short-circuit
+   * if the work is already done.
+   */
+  async setupAgentWorkspace(
+    sessionId: string,
+    options: {
+      systemPrompt?: string;
+      skillFiles?: Array<{ name: string; content: string }>;
+      provider?: ModelProvider;
+    } = {}
+  ): Promise<{ success: boolean; error?: string }> {
+    const sandbox = this.sandboxes.get(sessionId);
+    if (!sandbox) return { success: false, error: 'Sandbox not found' };
+
+    try {
+      // 1. Create workspace directory structure (idempotent)
+      await sandbox.exec.run(
+        'mkdir -p ~/workspace/skills ~/workspace/input ~/workspace/output ~/workspace/files',
+        { timeout: 10 }
+      );
+
+      // 2. Install Python doc libs (same as Claude setup) — only if missing
+      const checkPython = await sandbox.exec.run(
+        'python3 -c "import pptx" 2>&1 && echo PPTX_OK || echo PPTX_MISSING',
+        { timeout: 10 }
+      );
+      if (!checkPython.stdout?.includes('PPTX_OK')) {
+        console.log(`[Sandbox] setupAgentWorkspace: installing Python doc libs for ${options.provider || 'unknown'}`);
+        await sandbox.exec.run(
+          'sudo apt-get install -y -qq python3 python3-pip 2>&1 | tail -3 && pip3 install --break-system-packages python-pptx openpyxl python-docx 2>&1 | tail -3',
+          { timeout: 180 }
+        );
+      }
+
+      // 3. Write skill files into ~/workspace/skills/
+      if (options.skillFiles && options.skillFiles.length > 0) {
+        for (const f of options.skillFiles) {
+          const safeName = f.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+          // Use a unique sentinel to avoid clashes with content
+          const sentinel = `SKILL_EOF_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          await sandbox.exec.run(
+            `cat > ~/workspace/skills/${safeName} << '${sentinel}'\n${f.content}\n${sentinel}`,
+            { timeout: 15 }
+          );
+        }
+        console.log(`[Sandbox] setupAgentWorkspace: wrote ${options.skillFiles.length} skill file(s)`);
+      }
+
+      // 4. Write a universal AGENTS.md at workspace root.
+      // Convention: https://agents.md — read by Codex, Aider, OpenHands, and many others.
+      const agentsMdParts = [
+        '# Agent Instructions',
+        '',
+        'Workspace layout:',
+        '- `~/workspace/skills/` — skill/instruction files (read-only, do NOT modify)',
+        '- `~/workspace/input/` — reference files from the user (read-only)',
+        '- `~/workspace/output/` — directory for files YOU create',
+        '- `~/workspace/files/` — file buckets (mounted from agent storage)',
+        '',
+        'When creating files for the user, write to `~/workspace/output/`.',
+        '',
+      ];
+      if (options.systemPrompt) {
+        agentsMdParts.push('# System Prompt', '', options.systemPrompt);
+      }
+      const agentsMd = agentsMdParts.join('\n');
+      const sentinel = `AGENTS_EOF_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      await sandbox.exec.run(
+        `cat > ~/workspace/AGENTS.md << '${sentinel}'\n${agentsMd}\n${sentinel}`,
+        { timeout: 10 }
+      );
+
+      // 5. Mirror AGENTS.md → CLAUDE.md for maximum compatibility.
+      // claude-code reads CLAUDE.md; codex/aider/openhands/openclaw read AGENTS.md.
+      // Writing both means every provider has a single source of guidance.
+      await sandbox.exec.run('cp ~/workspace/AGENTS.md ~/workspace/CLAUDE.md', { timeout: 5 });
+
+      return { success: true };
+    } catch (error) {
+      console.error('[Sandbox] setupAgentWorkspace error:', error);
+      return { success: false, error: String(error) };
+    }
+  }
+
+  /**
+   * Phase 4: Install gbrain (Garry Tan's Postgres-native personal knowledge brain
+   * with hybrid RAG search) inside the sandbox and register it as an MCP server
+   * for the active provider.
+   *
+   * gbrain is a stdio MCP server (`gbrain serve`) backed by an embedded pglite
+   * Postgres — no Docker, no external services. Idempotent: subsequent calls
+   * short-circuit on the marker file ~/.gbrain/.oc-installed.
+   *
+   * Gated by `agentConfig.enable_memory` (set via `secrets.GBRAIN_ENABLE=true`
+   * for now since we don't want a schema migration this phase).
+   */
+  async setupGbrainMemory(
+    sessionId: string,
+    options: {
+      provider?: ModelProvider;
+      secrets?: Record<string, string>;
+    } = {}
+  ): Promise<{ success: boolean; error?: string; skipped?: boolean }> {
+    const sandbox = this.sandboxes.get(sessionId);
+    if (!sandbox) return { success: false, error: 'Sandbox not found' };
+
+    const provider = options.provider;
+    const secrets = options.secrets || {};
+
+    // Extend sandbox lifetime first — gbrain install can take 2-3 minutes
+    // (bun download + npm-ish postinstall + pglite init).
+    await this.keepAlive(sessionId).catch(() => { /* best-effort */ });
+
+    try {
+      // Idempotency marker: skip everything if already installed
+      const markerCheck = await sandbox.exec.run(
+        'test -f $HOME/.gbrain/.oc-installed && echo INSTALLED || echo MISSING',
+        { timeout: 5 }
+      );
+      const alreadyInstalled = markerCheck.stdout?.includes('INSTALLED');
+
+      if (!alreadyInstalled) {
+        console.log(`[Sandbox] setupGbrainMemory: installing gbrain for ${provider || 'unknown'}`);
+
+        // 1. Ensure Bun is present
+        const bunCheck = await sandbox.exec.run(
+          'export PATH="$HOME/.bun/bin:$PATH" && bun --version 2>/dev/null || echo MISSING',
+          { timeout: 5 }
+        );
+        if (bunCheck.stdout?.includes('MISSING')) {
+          console.log('[Sandbox] setupGbrainMemory: installing Bun');
+          const bunInstall = await sandbox.exec.run(
+            'curl -fsSL https://bun.sh/install | bash 2>&1 | tail -5',
+            { timeout: 180 }
+          );
+          if (bunInstall.exitCode !== 0) {
+            return { success: false, error: `Bun install failed: ${bunInstall.stderr?.slice(0, 500)}` };
+          }
+        }
+
+        // 2. Install gbrain globally via Bun (primary path).
+        // Postinstall scripts are auto-trusted via --trust because gbrain has native deps.
+        const gbInstall = await sandbox.exec.run(
+          'export PATH="$HOME/.bun/bin:$PATH" && bun install -g --trust github:garrytan/gbrain 2>&1 | tail -20',
+          { timeout: 300 }
+        );
+        console.log(`[Sandbox] setupGbrainMemory: bun install exit=${gbInstall.exitCode}`);
+
+        // Verify gbrain CLI is on PATH
+        const gbCheck = await sandbox.exec.run(
+          'export PATH="$HOME/.bun/bin:$PATH" && which gbrain && gbrain --version 2>&1 | head -1',
+          { timeout: 10 }
+        );
+
+        if (gbCheck.exitCode !== 0) {
+          // Fallback: git clone + bun link (see https://github.com/garrytan/gbrain/issues/218)
+          console.log('[Sandbox] setupGbrainMemory: bun install failed, trying git+link fallback');
+          const fallback = await sandbox.exec.run(
+            'export PATH="$HOME/.bun/bin:$PATH" && ' +
+            'rm -rf $HOME/gbrain-src && ' +
+            'git clone --depth=1 https://github.com/garrytan/gbrain.git $HOME/gbrain-src && ' +
+            'cd $HOME/gbrain-src && bun install --trust 2>&1 | tail -5 && bun link 2>&1 | tail -3',
+            { timeout: 300 }
+          );
+          if (fallback.exitCode !== 0) {
+            return { success: false, error: `gbrain install failed (both paths): ${fallback.stderr?.slice(0, 500)}` };
+          }
+        }
+
+        // 3. Initialize embedded pglite Postgres.
+        //    Bug 18: gbrain doctor needs an embedding-capable key (OpenAI / Voyage / ZeroEntropy)
+        //    BEFORE init, not just ANTHROPIC. If none present, fall back to --no-embedding
+        //    so the brain exists for lexical search; the user can re-init later when they
+        //    add an embedding key.
+        const hasEmbed = !!(secrets['OPENAI_API_KEY'] || secrets['VOYAGE_API_KEY'] || secrets['ZEROENTROPY_API_KEY']);
+        const initFlags = hasEmbed ? '--pglite' : '--pglite --no-embedding';
+        const initResult = await sandbox.exec.run(
+          `export PATH="$HOME/.bun/bin:$PATH" && gbrain init ${initFlags} 2>&1 | tail -10`,
+          { timeout: 60 }
+        );
+        console.log(`[Sandbox] setupGbrainMemory: gbrain init (${initFlags}) exit=${initResult.exitCode}`);
+
+        // 4. Persist API keys directly to gbrain's file-plane config
+        // (~/.gbrain/config.json, mode 0600). Avoids the argv leak of
+        // `gbrain config set <key> <secret>` — for ~1s per call the secret
+        // would otherwise be visible in `ps auxf` inside the sandbox.
+        //
+        // Format mirrors gbrain's `saveConfig()` in src/core/config.ts:
+        //   { engine, database_path, anthropic_api_key, openai_api_key,
+        //     voyage_api_key, zeroentropy_api_key, ... }
+        // We MERGE with whatever `gbrain init` just wrote so we don't clobber
+        // engine/database_path/embedding settings. The heredoc keeps the
+        // secret out of the visible argv of every command in the pipeline.
+        const apiKeyMap: Array<[string, string]> = [
+          ['ANTHROPIC_API_KEY', 'anthropic_api_key'],
+          ['OPENAI_API_KEY', 'openai_api_key'],
+          ['VOYAGE_API_KEY', 'voyage_api_key'],
+          ['ZEROENTROPY_API_KEY', 'zeroentropy_api_key'],
+        ];
+        const keyPatch: Record<string, string> = {};
+        for (const [secretName, gbConfigKey] of apiKeyMap) {
+          const val = secrets[secretName];
+          if (val) keyPatch[gbConfigKey] = val;
+        }
+        if (Object.keys(keyPatch).length > 0) {
+          // Serialize the patch JSON and ship it via heredoc into a temp file
+          // mode 0600, then have a tiny inline Python script merge it into
+          // ~/.gbrain/config.json (also mode 0600). The secret never appears
+          // in argv of any process — only in the heredoc body and the file
+          // contents (which are 0600 from the start).
+          const patchJson = JSON.stringify(keyPatch);
+          const sentinel = `GBPATCH_EOF_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          const mergeScript = [
+            '#!/bin/bash',
+            'set -e',
+            'umask 077',
+            'mkdir -p $HOME/.gbrain',
+            `cat > /tmp/.gbk-patch.json << '${sentinel}'`,
+            patchJson,
+            sentinel,
+            'chmod 0600 /tmp/.gbk-patch.json',
+            'python3 - << "PYEOF"',
+            'import json, os',
+            'cfg_path = os.path.expanduser("~/.gbrain/config.json")',
+            'patch_path = "/tmp/.gbk-patch.json"',
+            'try:',
+            '    with open(cfg_path) as f: cfg = json.load(f)',
+            'except Exception:',
+            '    cfg = {}',
+            'with open(patch_path) as f: patch = json.load(f)',
+            'cfg.update(patch)',
+            'with open(cfg_path, "w") as f: json.dump(cfg, f, indent=2)',
+            'os.chmod(cfg_path, 0o600)',
+            'print(f"gbrain config: updated {len(patch)} key(s)")',
+            'PYEOF',
+            'rm -f /tmp/.gbk-patch.json',
+          ].join('\n');
+          await sandbox.files.write('/tmp/.gbk-merge.sh', mergeScript);
+          const mergeRes = await sandbox.exec.run(
+            'bash /tmp/.gbk-merge.sh && rm -f /tmp/.gbk-merge.sh',
+            { timeout: 15 }
+          );
+          console.log(`[Sandbox] setupGbrainMemory: gbrain config merge exit=${mergeRes.exitCode}: ${mergeRes.stdout?.slice(0, 200)}`);
+        }
+
+        // 5. Mark as installed (idempotency for subsequent warmups)
+        await sandbox.exec.run(
+          'mkdir -p $HOME/.gbrain && touch $HOME/.gbrain/.oc-installed',
+          { timeout: 5 }
+        );
+
+        // 6. Health check (best-effort; do not fail the whole flow on doctor warnings)
+        const doctor = await sandbox.exec.run(
+          'export PATH="$HOME/.bun/bin:$PATH" && gbrain doctor 2>&1 | head -20',
+          { timeout: 15 }
+        );
+        console.log(`[Sandbox] setupGbrainMemory: doctor (exit=${doctor.exitCode}): ${doctor.stdout?.slice(0, 200)}`);
+      } else {
+        console.log(`[Sandbox] setupGbrainMemory: gbrain already installed, skipping`);
+      }
+
+      // 7. Register gbrain as MCP server for the active provider.
+      //    Done on every call so config changes (provider switch) are picked up.
+      const gbrainBin = '$HOME/.bun/bin/gbrain';
+
+      if (provider === 'hermes') {
+        // Hermes profile-based MCP config in ~/.hermes/profiles/default/config.yaml
+        await sandbox.exec.run(
+          `mkdir -p $HOME/.hermes/profiles/default && ` +
+          `python3 -c "
+import os, sys
+try:
+    import yaml
+except ImportError:
+    os.system('pip3 install --break-system-packages pyyaml -q')
+    import yaml
+p = os.path.expanduser('~/.hermes/profiles/default/config.yaml')
+data = {}
+if os.path.exists(p):
+    with open(p) as f:
+        data = yaml.safe_load(f) or {}
+data.setdefault('mcp', {})
+data['mcp']['gbrain'] = {'command': os.path.expanduser('~/.bun/bin/gbrain'), 'args': ['serve']}
+with open(p, 'w') as f:
+    yaml.safe_dump(data, f)
+print('hermes mcp config updated')
+"`,
+          { timeout: 30 }
+        );
+      } else {
+        // Generic fallback: write ~/workspace/.mcp.json — used by:
+        // claude-code, aider, opencode, openhands, goose, openclaw
+        // (modern coding agents read this when launching in a workspace).
+        // Bug 19: OpenClaw does NOT have an `mcpServers` config namespace
+        // (`openclaw config set mcpServers.gbrain.*` returns "Config path not found"),
+        // so it falls through here too.
+        // Merge with any existing config rather than overwriting.
+        await sandbox.exec.run(
+          `mkdir -p $HOME/workspace && python3 -c "
+import json, os
+p = os.path.expanduser('~/workspace/.mcp.json')
+data = {'mcpServers': {}}
+if os.path.exists(p):
+    try:
+        with open(p) as f:
+            data = json.load(f)
+        data.setdefault('mcpServers', {})
+    except Exception:
+        data = {'mcpServers': {}}
+data['mcpServers']['gbrain'] = {'command': os.path.expanduser('~/.bun/bin/gbrain'), 'args': ['serve']}
+with open(p, 'w') as f:
+    json.dump(data, f, indent=2)
+print('mcp.json updated with gbrain')
+"`,
+          { timeout: 10 }
+        );
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error('[Sandbox] setupGbrainMemory error:', error);
+      return { success: false, error: String(error) };
+    }
+  }
+
+  /**
+   * Phase 4: Configure Telegram via the provider's native channel.
+   *
+   * Reads secrets.TELEGRAM_BOT_TOKEN and secrets.TELEGRAM_USER_ID. If either
+   * is missing, returns { skipped: true } silently.
+   *
+   * Supports openclaw (hot-reload via `openclaw config set`) and hermes
+   * (writes ~/.hermes/profiles/default/config.yaml + ~/.hermes/env).
+   * Other providers: skipped (channels via core webhook API only).
+   */
+  async configureTelegram(
+    sessionId: string,
+    provider: ModelProvider | undefined,
+    secrets: Record<string, string>
+  ): Promise<{ success: boolean; error?: string; skipped?: boolean; reason?: string }> {
+    const sandbox = this.sandboxes.get(sessionId);
+    if (!sandbox) return { success: false, error: 'Sandbox not found' };
+
+    const token = secrets['TELEGRAM_BOT_TOKEN'];
+    const userId = secrets['TELEGRAM_USER_ID'];
+
+    if (!token || !userId) {
+      return { success: true, skipped: true, reason: 'TELEGRAM_BOT_TOKEN and/or TELEGRAM_USER_ID not set' };
+    }
+
+    if (provider !== 'openclaw' && provider !== 'hermes') {
+      return {
+        success: true,
+        skipped: true,
+        reason: `provider ${provider} does not have native Telegram channel — configure via webhook integrations instead`,
+      };
+    }
+
+    await this.keepAlive(sessionId).catch(() => { /* best-effort */ });
+
+    // Sanitize token and userId — they are strings the user controls but we
+    // still want to prevent shell-quoting bugs. Telegram bot tokens match
+    // /^\d+:[A-Za-z0-9_-]+$/ and user IDs are numeric.
+    if (!/^[0-9]+:[A-Za-z0-9_-]+$/.test(token)) {
+      return { success: false, error: 'TELEGRAM_BOT_TOKEN does not match expected format (digits:base64url)' };
+    }
+    if (!/^[0-9]+$/.test(String(userId))) {
+      return { success: false, error: 'TELEGRAM_USER_ID must be a numeric string' };
+    }
+
+    try {
+      if (provider === 'openclaw') {
+        // Pattern from /workspace/oc-repos/oc-openclaw-template/src/configure-telegram.ts
+        // (verified to work). openclaw config set hot-reloads — no restart needed.
+        const cmds = [
+          `openclaw config set channels.telegram.enabled true`,
+          `openclaw config set channels.telegram.botToken "${token}"`,
+          `openclaw config set channels.telegram.allowFrom '["${userId}"]'`,
+          `openclaw config set channels.telegram.dmPolicy allowlist`,
+        ];
+        for (const cmd of cmds) {
+          const r = await sandbox.exec.run(
+            `export PATH="$HOME/.openclaw/bin:$PATH" && ${cmd}`,
+            { timeout: 10 }
+          );
+          if (r.exitCode !== 0) {
+            return { success: false, error: `openclaw config failed (${cmd.split(' ')[2]}): ${r.stderr?.slice(0, 300)}` };
+          }
+        }
+        // Best-effort doctor check
+        await sandbox.exec.run(
+          `export PATH="$HOME/.openclaw/bin:$PATH" && openclaw doctor 2>&1 | head -5 || true`,
+          { timeout: 15 }
+        );
+        console.log(`[Sandbox] configureTelegram: openclaw channel configured for ${sessionId}`);
+        return { success: true };
+      }
+
+      if (provider === 'hermes') {
+        // Hermes: write ~/.hermes/env (referenced from config.yaml via ${TELEGRAM_BOT_TOKEN})
+        // + write the platform config block into ~/.hermes/profiles/default/config.yaml.
+        // We escape the token by writing it via stdin of a python script to avoid
+        // any chance of shell expansion.
+        const envScript = `python3 -c "
+import os, sys
+os.makedirs(os.path.expanduser('~/.hermes'), exist_ok=True)
+envpath = os.path.expanduser('~/.hermes/env')
+lines = []
+if os.path.exists(envpath):
+    with open(envpath) as f:
+        lines = [l for l in f.readlines() if not l.startswith('TELEGRAM_BOT_TOKEN=') and not l.startswith('TELEGRAM_USER_ID=')]
+lines.append('TELEGRAM_BOT_TOKEN=' + sys.argv[1] + '\\n')
+lines.append('TELEGRAM_USER_ID=' + sys.argv[2] + '\\n')
+with open(envpath, 'w') as f:
+    f.writelines(lines)
+os.chmod(envpath, 0o600)
+" '${token}' '${userId}'`;
+        const envResult = await sandbox.exec.run(envScript, { timeout: 10 });
+        if (envResult.exitCode !== 0) {
+          return { success: false, error: `hermes env write failed: ${envResult.stderr?.slice(0, 300)}` };
+        }
+
+        const cfgScript = `python3 -c "
+import os, sys
+try:
+    import yaml
+except ImportError:
+    os.system('pip3 install --break-system-packages pyyaml -q')
+    import yaml
+p = os.path.expanduser('~/.hermes/profiles/default/config.yaml')
+os.makedirs(os.path.dirname(p), exist_ok=True)
+data = {}
+if os.path.exists(p):
+    with open(p) as f:
+        data = yaml.safe_load(f) or {}
+data.setdefault('platforms', {})
+data['platforms']['telegram'] = {
+    'enabled': True,
+    'token': '\${TELEGRAM_BOT_TOKEN}',
+    'allowFrom': [sys.argv[1]],
+    'dmPolicy': 'allowlist',
+}
+with open(p, 'w') as f:
+    yaml.safe_dump(data, f)
+print('hermes telegram configured')
+" '${userId}'`;
+        const cfgResult = await sandbox.exec.run(cfgScript, { timeout: 30 });
+        if (cfgResult.exitCode !== 0) {
+          return { success: false, error: `hermes config.yaml write failed: ${cfgResult.stderr?.slice(0, 300)}` };
+        }
+        console.log(`[Sandbox] configureTelegram: hermes channel configured for ${sessionId}`);
+        return { success: true };
+      }
+
+      return { success: true, skipped: true };
+    } catch (error) {
+      console.error('[Sandbox] configureTelegram error:', error);
       return { success: false, error: String(error) };
     }
   }
@@ -1449,6 +1988,115 @@ BUCKET_EOF`, { timeout: 10 });
       command = '/bin/bash';
       commandArgs = ['/tmp/.agent_run.sh'];
       console.log(`[Sandbox] OpenCode will use model from config: ${opencodeModelFormat}`);
+    } else if (provider === 'openhands') {
+      // OpenHands (all-hands.dev) CLI — non-interactive task mode.
+      //   openhands -t "<task>"
+      // Auth via env: LLM_API_KEY + LLM_MODEL (e.g. "anthropic/claude-sonnet-4-5-20250929").
+      // Falls back to ANTHROPIC_API_KEY if LLM_API_KEY not set.
+      // Binary installed by `installAgentTools` via `uv tool install openhands-ai`
+      // into `$HOME/.local/bin/openhands` (or `/root/.local/bin/openhands` when
+      // installed as root). We extend PATH to cover both.
+      const ohModel = model || 'anthropic/claude-sonnet-4-5-20250929';
+      // LLM_MODEL for openhands expects "provider/model"; pass through as-is if already that shape.
+      console.log(`[Sandbox] runAgentCommand: provider=openhands, model=${ohModel}`);
+      await sandbox.files.write('/tmp/.agent_prompt', prompt);
+      const ohScript = [
+        '#!/bin/bash',
+        'mkdir -p ~/workspace',
+        'cd ~/workspace',
+        'export PATH="$HOME/.local/bin:/root/.local/bin:/usr/local/bin:$PATH"',
+        exportPrefix.replace(/ && $/, '') || ':',
+        `export LLM_API_KEY='${apiKey}'`,
+        `export ANTHROPIC_API_KEY='${apiKey}'`,
+        `export LLM_MODEL='${ohModel}'`,
+        // Load the prompt into a shell variable so embedded $, `, \\ in the
+        // prompt aren't shell-expanded. Quoted "$AGENT_PROMPT" expands to the
+        // verbatim variable value with no further interpolation.
+        'AGENT_PROMPT=$(cat /tmp/.agent_prompt)',
+        'openhands -t "$AGENT_PROMPT" 2>&1',
+      ].filter(Boolean);
+      await sandbox.files.write('/tmp/.agent_run.sh', ohScript.join('\n'));
+      command = '/bin/bash';
+      commandArgs = ['/tmp/.agent_run.sh'];
+    } else if (provider === 'hermes') {
+      // Hermes-agent (NousResearch) — Python CLI.
+      //   hermes -p "<prompt>"    (single-shot, non-interactive)
+      // ANTHROPIC_API_KEY env carries the Claude credentials. HERMES_NON_INTERACTIVE
+      // suppresses the first-run wizard.
+      console.log(`[Sandbox] runAgentCommand: provider=hermes, model=${model || 'default'}`);
+      await sandbox.files.write('/tmp/.agent_prompt', prompt);
+      const modelFlag = model ? `--model '${model}'` : '';
+      const hermesScript = [
+        '#!/bin/bash',
+        'mkdir -p ~/workspace',
+        'cd ~/workspace',
+        'export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"',
+        'export HERMES_NON_INTERACTIVE=1',
+        exportPrefix.replace(/ && $/, '') || ':',
+        `export ANTHROPIC_API_KEY='${apiKey}'`,
+        // See openhands branch for the rationale on the AGENT_PROMPT var.
+        'AGENT_PROMPT=$(cat /tmp/.agent_prompt)',
+        `hermes ${modelFlag} -p "$AGENT_PROMPT" 2>&1`,
+      ].filter(Boolean);
+      await sandbox.files.write('/tmp/.agent_run.sh', hermesScript.join('\n'));
+      command = '/bin/bash';
+      commandArgs = ['/tmp/.agent_run.sh'];
+    } else if (provider === 'goose') {
+      // Block's goose CLI — supports headless `run` mode.
+      //   goose run -t "<text>" -q --provider <p> --model <m>
+      // --provider / --model override env so we don't need to write a config file.
+      // ANTHROPIC_API_KEY env carries the Claude credentials. -q suppresses chrome
+      // so stdout is mostly response text.
+      const gooseModel = model || 'claude-sonnet-4-5-20250929';
+      // Allow callers to pass "provider/model" — split if so.
+      let gooseProvider = 'anthropic';
+      let gooseModelOnly = gooseModel;
+      if (gooseModel.includes('/')) {
+        const idx = gooseModel.indexOf('/');
+        gooseProvider = gooseModel.slice(0, idx);
+        gooseModelOnly = gooseModel.slice(idx + 1);
+      }
+      console.log(`[Sandbox] runAgentCommand: provider=goose, gooseProvider=${gooseProvider}, model=${gooseModelOnly}`);
+      await sandbox.files.write('/tmp/.agent_prompt', prompt);
+      const gooseScript = [
+        '#!/bin/bash',
+        'mkdir -p ~/workspace',
+        'cd ~/workspace',
+        'export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"',
+        exportPrefix.replace(/ && $/, '') || ':',
+        `export ANTHROPIC_API_KEY='${apiKey}'`,
+        `export GOOSE_PROVIDER='${gooseProvider}'`,
+        `export GOOSE_MODEL='${gooseModelOnly}'`,
+        // -i - reads instructions from stdin; we pipe the prompt file for safer arg handling.
+        `cat /tmp/.agent_prompt | goose run -i - -q --provider '${gooseProvider}' --model '${gooseModelOnly}' 2>&1`,
+      ].filter(Boolean);
+      await sandbox.files.write('/tmp/.agent_run.sh', gooseScript.join('\n'));
+      command = '/bin/bash';
+      commandArgs = ['/tmp/.agent_run.sh'];
+    } else if (provider === 'openclaw') {
+      // OpenClaw — installed by `installAgentTools` into $HOME/.openclaw/bin/openclaw.
+      // Non-interactive one-shot mode:
+      //   openclaw agent --local "<prompt>"
+      // ANTHROPIC_API_KEY env supplies the LLM credentials. PATH extension covers
+      // both /root/.openclaw/bin (when installed as root) and ~/.openclaw/bin
+      // (when installed by the sandbox user).
+      console.log(`[Sandbox] runAgentCommand: provider=openclaw, model=${model || 'default'}`);
+      await sandbox.files.write('/tmp/.agent_prompt', prompt);
+      const ocModelFlag = model ? `--model '${model}'` : '';
+      const openclawScript = [
+        '#!/bin/bash',
+        'mkdir -p ~/workspace',
+        'cd ~/workspace',
+        'export PATH="$HOME/.openclaw/bin:/root/.openclaw/bin:/usr/local/bin:$PATH"',
+        exportPrefix.replace(/ && $/, '') || ':',
+        `export ANTHROPIC_API_KEY='${apiKey}'`,
+        // See openhands branch for the rationale on the AGENT_PROMPT var.
+        'AGENT_PROMPT=$(cat /tmp/.agent_prompt)',
+        `openclaw agent --local ${ocModelFlag} "$AGENT_PROMPT" 2>&1`,
+      ].filter(Boolean);
+      await sandbox.files.write('/tmp/.agent_run.sh', openclawScript.join('\n'));
+      command = '/bin/bash';
+      commandArgs = ['/tmp/.agent_run.sh'];
     } else {
       throw new Error(`Unknown provider: ${provider}`);
     }

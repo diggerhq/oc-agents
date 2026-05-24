@@ -786,7 +786,7 @@ export interface Session {
   branch?: string;
   sandbox_id?: string;
   status: 'pending' | 'active' | 'completed' | 'failed';
-  agent_provider?: 'claude-code' | 'aider' | 'opencode';
+  agent_provider?: 'claude-code' | 'aider' | 'opencode' | 'openhands' | 'hermes' | 'goose' | 'openclaw';
   agent_model?: string;
   created_at: string;
   updated_at: string;
