@@ -4,7 +4,9 @@ import cors from 'cors';
 import session from 'express-session';
 import { createServer } from 'http';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { initializeDatabase, execute, queryOne } from './db/index.js';
+import { parseBoolEnv } from './utils/env.js';
 import { initWebSocket } from './services/websocket.js';
 import { startQueueWorker } from './workers/taskQueue.js';
 import { startScheduleWorker } from './workers/scheduleWorker.js';
@@ -39,6 +41,12 @@ import organizationsRoutes from './routes/organizations.js';
 import portalCustomizerRoutes from './routes/portalCustomizer.js';
 import { recoverStuckWorkflows } from './routes/workflowOrchestration.js';
 import { setOrgContext } from './middleware/orgAuth.js';
+
+// __dirname equivalent for ESM. Used to anchor static-asset paths to the
+// compiled file location rather than process.cwd(), so the frontend serves
+// regardless of how the process is started (Docker, systemd, dev, etc.).
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = createServer(app);
@@ -172,13 +180,32 @@ async function startServer() {
   app.use(express.json({ limit: '5mb' })); // Increased for portal customizer with base64 images
   app.use(express.urlencoded({ extended: true, limit: '5mb' })); // For Slack slash commands
 
+  // Cookie secure flag — independent of NODE_ENV so production deploys behind
+  // a plain-HTTP load balancer (or during cutover before TLS lands) still work.
+  //
+  // Cookie-secure precedence:
+  //   COOKIE_SECURE=true|false  → explicit override (highest priority)
+  //   TRUST_PROXY=1             → behind a TLS-terminating proxy: assume HTTPS
+  //                                upstream, so cookies should be secure
+  //   NODE_ENV=production       → legacy default (secure=true)
+  //   otherwise                 → secure=false (dev / direct-HTTP testing)
+  const trustProxy = parseBoolEnv('TRUST_PROXY', false);
+  const cookieSecure = parseBoolEnv(
+    'COOKIE_SECURE',
+    trustProxy || process.env.NODE_ENV === 'production'
+  );
+  if (trustProxy) {
+    app.set('trust proxy', 1);
+  }
+  console.log(`[server] cookie.secure=${cookieSecure} trustProxy=${trustProxy}`);
+
   app.use(session({
     store: sessionStore,
     secret: process.env.SESSION_SECRET || 'dev-secret-change-in-production',
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: process.env.NODE_ENV === 'production',
+      secure: cookieSecure,
       httpOnly: true,
       sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
@@ -255,12 +282,28 @@ async function startServer() {
     });
   });
 
-  // Serve frontend static files in production
-  if (process.env.NODE_ENV === 'production') {
-    // In Docker, frontend is at /app/frontend/dist, backend runs from /app/backend
-    const frontendPath = path.join(process.cwd(), '../frontend/dist');
+  // Serve frontend static files.
+  //
+  // Triggers:
+  //   SERVE_FRONTEND=1        → always serve
+  //   SERVE_FRONTEND=0        → never serve
+  //   (unset) + NODE_ENV=production → serve (backwards compatible)
+  //
+  // Path resolution is __dirname-relative so it works regardless of process CWD.
+  // Override with FRONTEND_DIST_PATH for non-standard layouts.
+  const shouldServeFrontend = parseBoolEnv(
+    'SERVE_FRONTEND',
+    process.env.NODE_ENV === 'production'
+  );
+
+  if (shouldServeFrontend) {
+    // __dirname is .../backend/dist after build. Frontend dist lives at .../frontend/dist.
+    // ../.. takes us from backend/dist to the monorepo root, then frontend/dist.
+    const defaultFrontendPath = path.resolve(__dirname, '../../frontend/dist');
+    const frontendPath = process.env.FRONTEND_DIST_PATH || defaultFrontendPath;
+    console.log(`[frontend] Serving static files from: ${frontendPath}`);
     app.use(express.static(frontendPath));
-    
+
     // Handle client-side routing - serve index.html for non-API routes
     app.get('*', (req, res, next) => {
       if (req.path.startsWith('/api/') || req.path.startsWith('/ws')) {
