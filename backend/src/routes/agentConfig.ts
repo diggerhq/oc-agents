@@ -86,7 +86,20 @@ router.patch('/:sessionId/config', requireAuth, async (req, res) => {
     return res.status(404).json({ error: 'Agent not found' });
   }
   
-  console.log('[AgentConfig] Received update request:', JSON.stringify(req.body, null, 2));
+  // Bug 27: don't log secrets in plain text. Redact secret values before logging the request body.
+  const redactedBody = { ...req.body };
+  if (redactedBody.secrets && typeof redactedBody.secrets === 'object') {
+    redactedBody.secrets = Object.fromEntries(
+      Object.keys(redactedBody.secrets).map(k => [k, '<redacted>'])
+    );
+  }
+  if (typeof redactedBody.webhook_secret === 'string' && redactedBody.webhook_secret.length > 0) {
+    redactedBody.webhook_secret = '<redacted>';
+  }
+  if (typeof redactedBody.portal_jwt_secret === 'string' && redactedBody.portal_jwt_secret.length > 0) {
+    redactedBody.portal_jwt_secret = '<redacted>';
+  }
+  console.log('[AgentConfig] Received update request:', JSON.stringify(redactedBody, null, 2));
   
   const { 
     name, 
